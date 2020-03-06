@@ -1,0 +1,33 @@
+This is a barebones driver for the KSZ8863 switch. Currently, it just turns the switch on and
+uses it in unmanaged mode.
+
+As necessary, a sysfs interface will be added to support changing switch settings.
+
+To configure the switch in your device tree:
+
+&ecspi1 {
+    ksz8863: ksz8863@0 {
+        compatible = "microchip,ksz8863";
+        reg = <0>;
+        status = "okay";
+
+        spi-max-frequency = <4000000>;
+        spi-cpol;
+        spi-cpha;
+    };
+};
+
+To configure the FEC on an imx device to use it, use a fixed-link connection:
+
+&fec {
+    pinctrl-0 = <&pinctrl_enet>;
+    phy-mode = "rmii";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    status = "okay";
+
+    fixed-link {
+        speed = <100>;
+        full-duplex;
+    };
+};

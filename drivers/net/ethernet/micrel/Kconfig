@@ -1,0 +1,9 @@
+
+config KSZ8863
+	bool "KSZ8863 Ethernet Switch"
+	depends on SPI
+	---help---
+	  This adds support for managing a Microchip KSZ8863 switch through
+	  a sysfs interface.
+
+	  It currently only uses SPI to interface with the switch.
