@@ -17,7 +17,7 @@
 #include <linux/of_platform.h>
 #include <linux/errno.h>
 #include <linux/sysfs.h>
-#include <linux/spi.h>
+#include <linux/spi/spi.h>
 
 #define KSZ8863_DRIVER_NAME "ksz8863"
 
@@ -41,14 +41,15 @@ struct ksz8863_data {
 };
 
 static int ksz8863_spi_xfer(struct ksz8863_data *data, u8 *tx, u8 *rx, u32 length) {
-	struct spi_transfer xfer;
-	struct spi_message msg;
+	struct spi_transfer xfer = { 0 };
+	struct spi_message msg = { 0 };
 
-	xfer.tx = tx;
-	xfer.length = length;
-	xfer.rx = rx;
+	xfer.tx_buf = tx;
+	xfer.len = length;
+	xfer.rx_buf = rx;
 
-	spi_message_init_with_transfers(&msg, &xfer, 1);
+	spi_message_init(&msg);
+	spi_message_add_tail(&xfer, &msg);
 	return spi_sync(data->spi, &msg);
 }
 
@@ -60,11 +61,14 @@ static int ksz8863_spi_read(struct ksz8863_data *data, u8 *dst, u8 addr, u32 cou
 	u8 tx[KSZ8863_MAX_XFER];
 	u8 rx[KSZ8863_MAX_XFER];
 
-	if (count > KSZ8863_MAX_XFER_VALUES)
+	if (count > KSZ8863_MAX_XFER_VALUES) {
+		dev_dbg(&data->spi->dev,
+			"tried to read %d > %d values.\n", count, KSZ8863_MAX_XFER_VALUES);
 		return -EINVAL;
+	}
 
 	memset(tx, 0, sizeof(tx));
-	tx[0] = KSZ_SPI_READ_CMD;
+	tx[0] = KSZ8863_SPI_READ_CMD;
 	tx[1] = addr;
 
 	/* 2 bytes for command and address */
@@ -79,10 +83,13 @@ static int ksz8863_spi_read(struct ksz8863_data *data, u8 *dst, u8 addr, u32 cou
 static int ksz8863_spi_write(struct ksz8863_data *data, u8 *src, u8 addr, u32 count) {
 	u8 tx[KSZ8863_MAX_XFER];
 
-	if (count > KSZ8863_MAX_XFER_VALUES)
+	if (count > KSZ8863_MAX_XFER_VALUES) {
+		dev_dbg(&data->spi->dev,
+			"tried to write %d > %d values.\n", count, KSZ8863_MAX_XFER_VALUES);
 		return -EINVAL;
+	}
 
-	tx[0] = KSZ_SPI_WRITE_CMD;
+	tx[0] = KSZ8863_SPI_WRITE_CMD;
 	tx[1] = addr;
 	memcpy(&tx[2], src, count);
 
@@ -95,8 +102,10 @@ static u8 ksz8863_spi_read8(struct ksz8863_data *data, u8 addr) {
 	u8 rx;
 
 	ret = ksz8863_spi_read(data, &rx, addr, 1);
-	if (ret)
+	if (ret) {
+		dev_dbg(&data->spi->dev, "ksz8863_spi_read returned %d.\n", ret);
 		return 0;
+	}
 
 	return rx;
 }
@@ -121,12 +130,11 @@ static u16 ksz8863_get_chipid(struct ksz8863_data *data) {
 
 static int ksz8863_probe(struct spi_device *spi) {
 	struct ksz8863_data *data;
-	int ret;
 	u16 chipid;
 
 	dev_info(&spi->dev, "ksz8863_probe\n");
 
-	data = kzalloc(sizeof(*priv), GFP_KERNEL);
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
 	if (!data) {
 		dev_err(&spi->dev, "Could not allocate driver private data\n");
 		return -ENOMEM;
@@ -134,16 +142,22 @@ static int ksz8863_probe(struct spi_device *spi) {
 
 	dev_set_drvdata(&spi->dev, data);
 	data->spi = spi;
+	spi->bits_per_word = 8;
 
+	/* seems to need a dummy read to wake the device up */
+	chipid = ksz8863_get_chipid(data);
+
+	/* actually check the chip id the second time around */
 	chipid = ksz8863_get_chipid(data);
 	if (KSZ8863_CHIP_ID != (chipid & KSZ8863_CHIP_ID_MASK)) {
-		dev_err(&spi->dev, "Invalid chip ID 0x%x found\n", chipid)
+		dev_err(&spi->dev, "Invalid chip ID 0x%x found\n", chipid);
 		return -ENODEV;
 	}
 
-	dev_info(&spi->dev, "Found KSZ8863, revision %d\n", (chipid & KSZ8863_REVISION_MASK));
+	dev_info(&spi->dev, "Found KSZ8863, revision %d\n", (chipid & KSZ8863_CHIP_REVISION_MASK));
 
-	// @todo set start switch bit here
+	// Device automatically comes up in unmanaged mode with start set,
+	// so nothing further is needed for basic functionality
 
 	return 0;
 }
@@ -151,7 +165,7 @@ static int ksz8863_probe(struct spi_device *spi) {
 static int ksz8863_remove(struct spi_device *spi) {
 	struct ksz8863_data *data;
 
-	data = dev_get_drvdata(spi);
+	data = dev_get_drvdata(&spi->dev);
 	if (!data)
 		return 0;
 
@@ -176,7 +190,7 @@ static struct spi_driver ksz8863_driver = {
 	.remove = ksz8863_remove,
 };
 
-module_spi_driver(&ksz8863_driver);
+module_spi_driver(ksz8863_driver);
 
 MODULE_DESCRIPTION("KSZ8863 switch driver with SPI interface");
 MODULE_AUTHOR("Greg Malysa <greg.malysa@timesys.com>");
